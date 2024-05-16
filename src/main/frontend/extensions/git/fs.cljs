@@ -4,10 +4,14 @@
    ["isomorphic-git" :as git]
    [clojure.string :as string]
    [frontend.util :as util]
+   [frontend.mobile.util :as mobile-util]
    [frontend.fs :as fs]
    [frontend.state :as state]
    [lambdaisland.glogi :as log]
-   [goog.object :as gobj]))
+   [goog.object :as gobj]
+   [frontend.extensions.git.node :as node-backend]
+   [frontend.extensions.git.capacitor :as capacitor-backend]
+   [logseq.common.path :as path]))
 
 ;; required return value from stat
 ;; export interface Stats {
@@ -142,7 +146,6 @@
       (.catch js/console.error))
   -r
   ((:isDirectory -r))
-  (stat "logseq_dev/.git/info/exclude")
   (-> (fs/read-file "logseq_dev" ".git/info/exclude") (.then js/console.log))
   (js/console.log cb)
   ((first cb) nil 1)
@@ -153,9 +156,45 @@
       (.then #(js/console.log "haha" %))
       (.finally (fn [r] (js/console.log "done" r))))
 
-  (-> (git/statusMatrix #js {:fs (clj->js fs-interface) :dir graph-path})
+  (log/info :haha "haha"))
+
+(defn- get-native-fs
+  "Native FS backend of current platform"
+  []
+  (cond
+    (util/electron?) node-backend/node-fs
+    (mobile-util/native-platform?) capacitor-backend/capacitor-fs
+    ;; TODO
+    :else nil))
+
+(comment
+  (def base-dir "file:///storage/emulated/0/Documents/logseq_dev")
+  (get-native-fs)
+  (require '[goog.object :as gobj])
+  (def fs (clj->js {:promises (get-native-fs)}))
+  fs
+  (-> ((:stat (get-native-fs)) (path/path-join base-dir ".git/info/exclude") {:bigint false})
+      (p/then #(def -r %)))
+  (-> ((:readFile (get-native-fs)) ".git/HEAD")
+      (p/then #(def -r %))
+      (p/catch js/console.error))
+  -r
+  (log/info :sanity "here")
+  (type (gobj/get (clj->js -r) "isDirectory"))
+  (js/console.log (clj->js -r))
+  (-> (git/status #js {:fs fs :dir base-dir :filepath "pages/contents.md"})
+      (p/then #(def -r %))
       (.then js/console.log)
       (.then #(js/console.log "haha" %))
       (.finally (fn [r] (js/console.log "done" r))))
+  (-> (git/init #js {:fs fs :dir base-dir}))
+
+  (-> (git/statusMatrix #js {:fs fs :dir "."})
+      (.then js/console.log)
+      (.catch js/console.error))
   (-> (git/log #js {:fs (clj->js fs-interface) :dir graph-path :depth 2 :ref "main"})
-      (.then js/console.log)))
+      (.then js/console.log))
+
+  ((fn [x & {:keys [:a :b] :as xs}]
+     (println x (:a xs)))
+   1  1 2 :b 3))

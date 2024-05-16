@@ -30,6 +30,7 @@
             [electron.utils :as utils]
             [electron.window :as win]
             [goog.functions :refer [debounce]]
+            [goog.object :as gobj]
             [logseq.common.graph :as common-graph]
             [promesa.core :as p]))
 
@@ -43,6 +44,9 @@
 
 (defmethod handle :readdir [_window [_ dir]]
   (common-graph/readdir dir))
+
+(defmethod handle :readdirGit [_window [_ dir]]
+  (fs/readdirSync dir))
 
 (defmethod handle :listdir [_window [_ dir flat?]]
   (when (and dir (fs-extra/pathExistsSync dir))
@@ -96,6 +100,9 @@
 (defmethod handle :readFile [_window [_ path]]
   (utils/read-file path))
 
+(defmethod handle :readFileGit [_window [_ path options]]
+  (fs/readFileSync path options))
+
 (defn writable?
   [path]
   (assert (string? path))
@@ -143,8 +150,27 @@
   (logger/info ::rename "from" old-path "to" new-path)
   (fs/renameSync old-path new-path))
 
-(defmethod handle :stat [_window [_ path]]
-  (fs/statSync path))
+(defmethod handle :stat [_window [_ path & _options]]
+  (let [stat (if (nil? _options)
+               (fs/statSync path)
+               (fs/statSync path _options))]
+    (gobj/set stat "isDirectory" (.isDirectory stat))
+    (gobj/set stat "isFile" (.isFile stat))
+    (gobj/set stat "isSymbolicLink" (.isSymbolicLink stat))
+    stat))
+
+(comment
+  (handle :stat "/Users/oferyehuda/Documents/logseq_dev/.git/info/exclude")
+  (require '[cljs-bean.core :as bean])
+  (def tmp (fs/statSync "/Users/oferyehuda/Documents/logseq_dev/.git/info/exclude"))
+  tmp
+  (gobj/set tmp "tmp" 1)
+  (require '[goog.object :as gobj])
+  (gobj/get tmp "tmp")
+  (bean/->js tmp)
+  (.isDirectory tmp)
+  (js->clj tmp)
+  )
 
 (defn- get-files
   "Returns vec of file-objs"
@@ -748,7 +774,11 @@
                    ;; Values that are not non-JS objects will cause this
                    ;; exception -
                    ;; https://www.electronjs.org/docs/latest/breaking-changes#behavior-changed-sending-non-js-objects-over-ipc-now-throws-an-exception
-                   (bean/->js (handle (or (utils/get-win-from-sender event) window) message)))
+                  (logger/info :ipc-handler #_event message)
+                   (let [result (bean/->js (handle (or (utils/get-win-from-sender event) window) message))]
+                     (logger/info :ipc-handler result #_(.isDirectory result))
+                     
+                     result))
                  (catch :default e
                    (when-not (contains? #{"mkdir" "stat"} (nth args-js 0))
                      (logger/error "IPC error: " {:event event
@@ -756,3 +786,6 @@
                                    e))
                    e))))
     #(.removeHandler ipcMain main-channel)))
+
+      ;; (when (and (= (first args) "stat") (= (second args) "/Users/oferyehuda/Documents/logseq_dev/.git/info/exclude"))
+        ;; (log/info :test (.isDirectory result)))
