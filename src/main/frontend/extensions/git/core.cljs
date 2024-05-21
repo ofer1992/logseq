@@ -1,218 +1,205 @@
 (ns frontend.extensions.git.core
   (:require #_["dugite" :refer [GitProcess]]
-            ["isomorphic-git" :as git]
-            #_[goog.object :as gobj]
-            #_[electron.state :as state]
+   ["isomorphic-git" :as git]
+            [frontend.config :as config]
             [frontend.state :as state]
-            #_[electron.utils :as utils]
-            #_[electron.logger :as logger]
             [promesa.core :as p]
             [clojure.string :as string]
             [goog.string :as gstring]
             [goog.object :as gobj]
-            [goog.string.format]
-            [frontend.fs :as fs]
-            [frontend.fs.protocol :as protocol]
-            [frontend.fs.nfs :as nfs]
-            #_["path" :as node-path]
-            #_["os" :as os]
-
-            ))
+            ;; [goog.string.format]
+            [frontend.extensions.git.capacitor :as capacitor-backend]))
 (comment
   (-> (fs/readdir "logseq_dev")
       (.then prn))
   (js-debugger))
 
-(def graph-path "logseq_dev")
-(def fs-interface {
-    "readFile" fs/read-file
-    "writeFile" fs/write-file!
-    "rename" fs/rename!
-    "mkdir" fs/mkdir!
-    "readdir" fs/readdir
-    "rmdir" fs/rmdir!
-    "stat" (fn [path callback] (fs/stat path))
-    "unlink" fs/unlink!
-    "readlink" identity
-    "lstat" identity
-    "symlink" identity
-})
+(def base-dir (config/get-repo-dir (state/get-current-repo)))
+(def fs (clj->js {:promises capacitor-backend/capacitor-fs}))
 
-(def fs-interface-debug {
-    "readFile" (fn [& args] (prn args) (js-debugger) (apply fs/read-file args))
-    "writeFile" (fn [& args] (prn args) (js-debugger) (apply fs/write-file! args))
-    "rename" (fn [& args] (js-debugger) (apply fs/rename! args))
-    "mkdir" (fn [& args] (js-debugger) (apply fs/mkdir! args))
-    "readdir" (fn [& args] (js-debugger) (apply fs/readdir args))
-    "rmdir" (fn [& args] (js-debugger) (apply fs/rmdir! args))
-    "stat" (fn [path callback] (prn path callback) (js-debugger) (fs/stat path))
-    "unlink" (fn [& args] (js-debugger) (apply fs/unlink! args))
-    "readlink" (fn [& args] (js-debugger) (apply identity args))
-    "lstat" (fn [& args] (js-debugger) (apply identity args))
-    "symlink" (fn [& args] (js-debugger) (apply identity args))
-}
-)
-
-;; (def log-error (partial logger/error "[Git]"))
+(def statusMatrix->shortstatus 
+  {"000" "``"
+   "003" "AD"
+   "020" "??"
+   "022" "A"
+   "023" "AM"
+   "100" "D"
+   "101" "D"
+   "103" "MD"
+   "110" "D + ??"
+   "111" "``"
+   "113" "MM"
+   "120" "D + ??"
+   "121" "M"
+   "122" "M"
+   "123" "MM"})
 (def log-error (partial js/console.log "[Git]"))
 
 (defn get-graph-git-dir
   [graph-path]
   "TODO"
   #_(when-let [graph-path (some-> graph-path
-                                (string/replace "/" "_")
-                                (string/replace ":" "comma"))]
-    (let [dir (.join node-path (.homedir os) ".logseq" "git" graph-path ".git")]
-      (. fs ensureDirSync dir)
-      dir)))
+                                  (string/replace "/" "_")
+                                  (string/replace ":" "comma"))]
+      (let [dir (.join node-path (.homedir os) ".logseq" "git" graph-path ".git")]
+        (. fs ensureDirSync dir)
+        dir)))
 
 #_(defn run-git!
-  [graph-path commands]
-  (when (and graph-path (fs/existsSync graph-path))
-    (p/let [result (.exec GitProcess commands graph-path)]
-      (if (zero? (gobj/get result "exitCode"))
-        (let [result (gobj/get result "stdout")]
-          (p/resolved result))
-        (let [error (gobj/get result "stderr")]
-          (when-not (string/blank? error)
-            (log-error error))
-          (p/rejected error))))))
+    [graph-path commands]
+    (when (and graph-path (fs/existsSync graph-path))
+      (p/let [result (.exec GitProcess commands graph-path)]
+        (if (zero? (gobj/get result "exitCode"))
+          (let [result (gobj/get result "stdout")]
+            (p/resolved result))
+          (let [error (gobj/get result "stderr")]
+            (when-not (string/blank? error)
+              (log-error error))
+            (p/rejected error))))))
 
 #_(defn run-git2!
-  [graph-path commands]
-  (when (and graph-path (fs/existsSync graph-path))
-    (p/let [^js result (.exec GitProcess commands graph-path)]
-      result)))
+    [graph-path commands]
+    (when (and graph-path (fs/existsSync graph-path))
+      (p/let [^js result (.exec GitProcess commands graph-path)]
+        result)))
 
 (defn git-dir-exists?
   [graph-path]
   "TODO"
   #_(try
-    (let [p (.join node-path graph-path ".git")]
-      (.isDirectory (fs/statSync p)))
-    (catch :default _e
-      nil)))
+      (let [p (.join node-path graph-path ".git")]
+        (.isDirectory (fs/statSync p)))
+      (catch :default _e
+        nil)))
 
 (defn remove-dot-git-file!
   [graph-path]
   "TODO"
   #_(try
-    (let [_ (when (string/blank? graph-path)
-              (utils/send-to-renderer :setCurrentGraph {})
-              (throw (js/Error. "Empty graph path")))
-          p (.join node-path graph-path ".git")]
-      (when (and (fs/existsSync p)
-                 (.isFile (fs/statSync p)))
-        (let [content (string/trim (.toString (fs/readFileSync p)))
-              dir-path (string/replace content "gitdir: " "")]
-          (when (and content
-                     (string/starts-with? content "gitdir:")
-                     (string/includes? content ".logseq/")
-                     (not (fs/existsSync dir-path)))
-            (fs/unlinkSync p)))))
-    (catch :default e
-      (log-error e))))
+      (let [_ (when (string/blank? graph-path)
+                (utils/send-to-renderer :setCurrentGraph {})
+                (throw (js/Error. "Empty graph path")))
+            p (.join node-path graph-path ".git")]
+        (when (and (fs/existsSync p)
+                   (.isFile (fs/statSync p)))
+          (let [content (string/trim (.toString (fs/readFileSync p)))
+                dir-path (string/replace content "gitdir: " "")]
+            (when (and content
+                       (string/starts-with? content "gitdir:")
+                       (string/includes? content ".logseq/")
+                       (not (fs/existsSync dir-path)))
+              (fs/unlinkSync p)))))
+      (catch :default e
+        (log-error e))))
 
 (defn init!
   [graph-path]
-  "TODO"
+  (git/init #js {:fs fs :dir graph-path})
   #_(let [_ (remove-dot-git-file! graph-path)
-        separate-git-dir (get-graph-git-dir graph-path)
-        args (cond-> {:fs fs :dir graph-path}
-               (git-dir-exists? graph-path) identity
-               separate-git-dir (assoc :gitdir separate-git-dir))]
-    (p/let [_ (git/init (clj->js args))]
-      (when utils/win32?
-        (git/setConfig (clj->js (assoc args :path "core.safecrlf" :value "false")))))))
+          separate-git-dir (get-graph-git-dir graph-path)
+          args (cond-> {:fs fs :dir graph-path}
+                 (git-dir-exists? graph-path) identity
+                 separate-git-dir (assoc :gitdir separate-git-dir))]
+      (p/let [_ (git/init (clj->js args))]
+        (when utils/win32?
+          (git/setConfig (clj->js (assoc args :path "core.safecrlf" :value "false")))))))
+
+(comment 
+  (-> (init! base-dir)
+      (p/then js/console.log)
+      (p/catch js/console.error))
+
+  )
 
 (defn add-all!
   [graph-path]
-  (p/let [fs (fs/get-fs graph-path)
-          status (git/statusMatrix #js {:fs fs :dir graph-path :gitdir (get-graph-git-dir graph-path)})
+  (p/let [status (git/statusMatrix #js {:fs fs :dir graph-path})
           files (map first (js->clj status))
-          add #(git/add #js {:fs fs :dir graph-path :gitdir (get-graph-git-dir graph-path) :filepath %})]
+          add #(git/add #js {:fs fs :dir graph-path :filepath % })]
     ;; TODO filter files for modified ones
     (run! add files)))
-
+  
 (comment
-  (keys (js->clj js/window.pfs))
-  (p/let [fs (clj->js fs-interface)
-          status (git/statusMatrix #js {:fs fs :dir graph-path #_#_:gitdir (get-graph-git-dir graph-path)})
+
+  (add-all! base-dir)
+  (p/let [status (git/statusMatrix #js {:fs fs :dir base-dir})
           files (map first (js->clj status))
           #_#_add #(git/add #js {:fs fs :dir graph-path :gitdir (get-graph-git-dir graph-path) :filepath %})]
-        ;; TODO filter files for modified ones
-    (js/console.log files)
-    (prn files)
+    ;; TODO filter files for modified ones
+    #_(run! add files)
     (js/console.log status)
-    (js/console.log "hey"))
-  (.replace (gobj/get #js {:fs (clj->js fs-interface) :dir graph-path :filepath "testing.lala"} "filepath") "la" "ba")
-  (-> (fs/stat (str graph-path "/pages/testing.md"))
-      (.then prn))
-  (-> (fs/stat graph-path "/.git/info/exclude")
-      (.then prn))
-  (-> ((get fs-interface "stat") (str graph-path "/pages/testing.md") #(prn %1 %2))
-      (.then prn))
-  (-> (git/status #js {:fs (clj->js fs-interface) :dir graph-path :filepath "pages/testing.md"})
-      (.then prn))
-  (def filepath (str graph-path "/pages/testing.md"))
-  (def filepath (str graph-path "/.git/info/exclude"))
-  (keys @nfs/nfs-file-handles-cache)
-  (-> (fs/stat (str graph-path filepath)) (.then prn))
-  (def tnfs (fs/get-fs filepath))
-  (-> (protocol/stat tnfs filepath) (.then prn))
-  (p/let [
-    handle (#'nfs/get-nfs-file-handle (str "handle/" filepath))
-    f (.getFile handle)
-    get-attr #(gobj/get f %)
-  ]
-    (js/console.log handle)
-    (js/console.log f))
-  
-  (-> ((get fs-interface "stat") "logseq_dev/.git/info/exclude" identity) (.then prn))
-)
+    (js/console.log files))
+  ;; (git/add #js {:fs fs :dir})
+  )
 
 (defn commit!
   [graph-path message]
-  "TODO"
-  #_(p/do!
-   (git/setConfig #js {:fs fs :dir graph-path :gitdir (get-graph-git-dir graph-path) :path "core.quotepath" :value "false"}
-   (git/commit #js {:fs fs :dir graph-path :gitdir (get-graph-git-dir graph-path) :message message})))
-   )
+  (p/do!
+   (git/setConfig #js {:fs fs :dir graph-path :path "core.quotepath" :value "false"})
+   (git/commit #js {:fs fs :dir graph-path :message message})))
 
 #_(defn add-all-and-commit-single-graph!
-  [graph-path message]
-  (let [message (if (string/blank? message)
-                  "Auto saved by Logseq"
-                  message)]
-    (->
-     (p/let [_ (init! graph-path)
-             _ (add-all! graph-path)]
-       (commit! graph-path message))
-     (p/catch (fn [error]
-                (when (and
-                       (string? error)
-                       (not (string/blank? error)))
-                  (if (string/starts-with? error "Author identity unknown")
-                    (utils/send-to-renderer "setGitUsernameAndEmail" {:type "git"})
-                    (utils/send-to-renderer "notification" {:type "error"
-                                                            :payload (str error "\nIf you don't want to see those errors or don't need git, you can disable the \"Git auto commit\" feature on Settings > Version control.")}))))))))
+    [graph-path message]
+    (let [message (if (string/blank? message)
+                    "Auto saved by Logseq"
+                    message)]
+      (->
+       (p/let [_ (init! graph-path)
+               _ (add-all! graph-path)]
+         (commit! graph-path message))
+       (p/catch (fn [error]
+                  (when (and
+                         (string? error)
+                         (not (string/blank? error)))
+                    (if (string/starts-with? error "Author identity unknown")
+                      (utils/send-to-renderer "setGitUsernameAndEmail" {:type "git"})
+                      (utils/send-to-renderer "notification" {:type "error"
+                                                              :payload (str error "\nIf you don't want to see those errors or don't need git, you can disable the \"Git auto commit\" feature on Settings > Version control.")}))))))))
 
 (defn add-all-and-commit!
   ([]
    (add-all-and-commit! nil))
   ([message]
-  "TODO"
+   "TODO"
    #_(doseq [path (state/get-all-graph-paths)] (add-all-and-commit-single-graph! path message))))
 
-(defn short-status!
+
+(defn short-status
   [graph-path]
-  "TODO"
   ;; good enough for now?
-  #_(p/let [status (git/statusMatrix #js {:fs fs :dir graph-path :gitdir (get-graph-git-dir graph-path)})
+  (p/let [status (js->clj (git/statusMatrix #js {:fs fs :dir graph-path}))
+          ss (map #(vector (get statusMatrix->shortstatus (apply str (rest %))) (first %)) status)
+          ss (map #(str (first %) " " (second %)) ss)
           changed (filter #(apply not= (rest %)) (js->clj status))
           format-fn #(str (apply gstring/format "%d%d%d %s" (concat (rest %) [(first %)])))
           formatted (map format-fn changed)]
-    (string/join "\n" formatted)))
+    (string/join "\n" ss)))
+
+(comment
+  (add-all! base-dir)
+(git/setConfig #js {:fs fs :dir base-dir :path "user.name" :value "ofer"})
+  (commit! base-dir "Auto saved by Logseq")
+  ((:readdir capacitor-backend/capacitor-fs) base-dir)
+  (-> (short-status base-dir)
+      #_(p/then #(def -r %))
+      (p/then js/console.log))
+  (-> (git/statusMatrix #js {:fs fs :dir base-dir})
+      (p/then js/console.log)
+      #_(p/then #(def -r (js->clj %)))
+      (p/catch #(js/console.error %)))
+  (-> (git/log #js {:fs fs :dir base-dir})
+      (p/then js/console.log))
+  
+  -r
+  (vector 1 2)
+  (apply str (rest (get -r 0)))
+  (git/commit #js {:fs fs :dir base-dir :message "Auto saved by Logseq" :author {:name "Logseq" :email ""}})
+  (-> (git/log #js {:fs fs :dir base-dir})
+      (p/then js/console.log))
+  (-> (git/status #js {:fs fs :dir base-dir :filepath "journals/2024_05_16.md"})
+      (p/then js/console.log))
+  )
+
 
 (defonce quotes-regex #"\"[^\"]+\"")
 (defn wrapped-by-quotes?
@@ -240,24 +227,24 @@
          (remove string/blank?))))
 
 #_(defn raw!
-  [graph-path args]
-  (init! graph-path)
-  (let [args (if (string? args)
-               (split-args args)
-               args)
-        error-handler (fn [error]
+    [graph-path args]
+    (init! graph-path)
+    (let [args (if (string? args)
+                 (split-args args)
+                 args)
+          error-handler (fn [error]
                         ;; TODO: why this happen?
-                        (when-not (string/blank? error)
-                          (let [error (str (first args) " error: " error)]
-                            (utils/send-to-renderer "notification" {:type "error"
-                                                                    :payload error}))
-                          (p/rejected error)))]
-    (->
-     (p/let [_ (when (= (first args) "commit")
-                 (add-all! graph-path))
-             result (run-git! graph-path (clj->js args))]
-       (p/resolved result))
-     (p/catch error-handler))))
+                          (when-not (string/blank? error)
+                            (let [error (str (first args) " error: " error)]
+                              (utils/send-to-renderer "notification" {:type "error"
+                                                                      :payload error}))
+                            (p/rejected error)))]
+      (->
+       (p/let [_ (when (= (first args) "commit")
+                   (add-all! graph-path))
+               result (run-git! graph-path (clj->js args))]
+         (p/resolved result))
+       (p/catch error-handler))))
 
 (defonce auto-commit-interval (atom nil))
 (defn- auto-commit-tick-fn
@@ -282,6 +269,5 @@
 (defn before-graph-close-hook!
   []
   (when (and ((not (state/disable-auto-commit?))
-             (state/commit-on-close?)))
-    (add-all-and-commit!))
-)
+              (state/commit-on-close?)))
+    (add-all-and-commit!)))

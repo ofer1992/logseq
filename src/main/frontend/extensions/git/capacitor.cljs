@@ -51,18 +51,73 @@
   (-> (:readFile fs) "file:/storage/emulated/0/Documents/logseq_dev/.git/HEAD" {:encoding "utf8"}
       (p/then #(def -r %))))
 
+(defn- <readdir [path]
+  (-> (p/chain (.readdir Filesystem (clj->js {:path path}))
+               #(js->clj % :keywordize-keys true)
+               :files)
+      (p/catch (fn [error]
+                 (throw (fs-error error "ENOTDIR"))))
+                 ))
+
+(defn- get-file-paths
+  "get all file paths recursively"
+  [path]
+  (p/let [result (p/loop [result []
+                          dirs [path]]
+                   (if (empty? dirs)
+                     (p/let [temp (.stat Filesystem (clj->js {:path path}))
+                            ;;  fixed-path (:uri (js->clj temp))
+                             fixed-path (.-uri temp)
+                             p-len (inc (count fixed-path))]
+                       (clj->js (map #(subs % p-len) result)))
+                     (p/let [d (first dirs)
+                             files (<readdir d)
+                             files (->> files
+                                        (remove (fn [{:keys [name  type]}]
+                                                  (or (string/starts-with? name ".")
+                                                      #_(and (= type "directory")
+                                                           (or (= name "bak")
+                                                               (= name "version-files")))))))
+                             files-dir (->> files
+                                            (filterv #(= (:type %) "directory"))
+                                            (mapv :uri))
+                             paths-result (->> files
+                                               (filterv #(= (:type %) "file"))
+                                               (mapv :uri))]
+                       (p/recur (concat result paths-result #_files-dir)
+                                (concat (rest dirs) files-dir)))))]
+    result))
+
+(comment
+  (def base-dir "file:/storage/emulated/0/Download/logseq_test2/pages/contents.md")
+  (-> (.stat Filesystem #js {:path base-dir})
+      (p/then js/console.log))
+  (-> (.readdir Filesystem #js {:path base-dir})
+      (p/then js/console.log))
+  
+  (-> (get-file-paths base-dir)
+      (p/then js/console.log))
+  )
 (def capacitor-fs
   (as-> {:mkdir (fn mkdir! [dir]
                   (.mkdir Filesystem
                           (clj->js
-                           {:path dir})))
+                           {:path dir :recursive true})))
 
          :readdir (fn readdir [dir]                  ; recursive
-                    (p/let [result (.readdir Filesystem (clj->js {:path dir}))
-                            result (js->clj result :keywordize-keys true)
-                            files (map :name (:files result))]
-                      (log/info :readdir {:dir dir :files files})
-                      files))
+                    #_(-> (p/let [result (get-file-paths dir)]
+                          (log/info :readdir {:dir dir :files result})
+                          result)
+                        (p/catch #(throw (fs-error % "ENOTDIR"))))
+                    (-> (p/let [result (.readdir Filesystem (clj->js {:path dir}))
+                                result (js->clj result :keywordize-keys true)
+                                files (clj->js (map :name (:files result)))]
+                          (log/info :readdir {:dir dir :files files})
+                          files)
+                        (p/catch (fn [error]
+                                   (throw (fs-error error "ENOTDIR"))))
+                        ))
+
          :unlink identity #_(fn unlink! [this repo fpath _opts]
                               (p/let [repo-dir (config/get-local-dir repo)
                                       recycle-dir (path/path-join repo-dir config/app-name ".recycle") ;; logseq/.recycle
@@ -90,12 +145,16 @@
                          (log/info :readFile {:path path :options options :data data})
                          data)))
 
-         :writeFile (fn write-file! [path content opts]
-                      (log/info :writeFile {:path path :content content :opts opts})
-                      (when-not (string/blank? path)
-                        (p/let [utf (:encoding (js->clj opts :keywordize-keys true))
-                                content (if (= utf "utf8") content (uint8->base64 content))]
-                          (.writeFile Filesystem (clj->js {:path path :data content :encoding (get opts :encoding)})))))
+         :writeFile (fn write-file!
+                      [path content opts]
+                       (log/info :writeFile {:path path :content content :opts opts})
+                        (when-not (string/blank? path)
+                          (p/let [opts (js->clj opts :keywordize-keys true)
+                                  ;; check if content type is Uint8Array
+                                  binary? (instance? js/Uint8Array content)]
+                            (if binary?
+                              (.writeFile Filesystem (clj->js {:path path :data (uint8->base64 content)}))
+                              (.writeFile Filesystem (clj->js {:path path :data content :encoding "utf8"}))))))
 
          :stat (fn stat [path & options]
                  (log/info :stat {:path path :options options})
@@ -103,7 +162,7 @@
                              updated (clj->js (create-stat (js->clj res :keywordize-keys true)))]
                        (log/info :stat {:path path :options options :res res :updated updated})
                        updated)
-                     (p/catch #(fs-error % "ENOENT"))
+                     (p/catch #(throw ( fs-error % "ENOENT")))
                      #_(p/catch (fn [e] (let [e (fs-error e "ENOENT")] (set! js/test e) (throw e))))))
                   ;;  :lstat (fn lstat [path]
                             ;; (.stat Filesystem (clj->js {:path path})))
@@ -113,22 +172,43 @@
          :symlink identity} fs
     (assoc fs :lstat (:stat fs))))
 
-
+;; {:writeFile {:path 
+;; "file:/storage/emulat … gseq_dev/.git/config"
+;; file:/storage/emulated/0/Documents/logseq_dev/.git/config
+;; , :content 
+;; "[core]↵ repositoryfo … ↵ ignorecase = true↵"
+;; , :opts #js {}}, :line 43}
 (comment
+  ;; binary? (instance? js/Uint8Array content)
+  (instance? js/Uint8Array 1)
+  (def content "[core]↵
+	repositoryformatversion = 0↵
+	filemode = false↵
+	bare = false↵
+	logallrefupdates = true↵
+	symlinks = false↵
+	ignorecase = true↵")
   (def fs capacitor-fs)
+  (-> ( (:writeFile fs) "file:/storage/emulated/0/Documents/logseq_dev/.git/config" content ))
   (-> (.readdir Filesystem #js {:path base-dir})
       (p/then #(def -r %)))
+  (-> ((:readdir fs) (str base-dir ""))
+      (p/then js/console.log)
+      (p/catch #(js/console.log ( gobj/get % "code"))))
+  (js->clj -r)
   (set! js/test cap-fs)
   (set! js/baseDir base-dir)
   (:readlink fs)
   (println cap-fs)
   (js->clj cap-fs)
+  ((:stat fs) "file:/storage/emulated/0/Download/logseq_test_repo-main/.git/index")
   (do
     (-> ((:stat fs) (path/path-join base-dir "pages/contents.md"))
         (p/then #(def -r (js->clj %)))
         (p/then #(js/console.log %))
         (p/catch #(js/console.error %))))
   (js->clj -r)
+  (.mkdir Filesystem #js {:path "file:/storage/emulated/0/Documents/logseq_dev/.git/hooks"})
   (-> (.readFile Filesystem (clj->js {:path (path/path-join base-dir "pages/contents.md") :encoding "utf8"}))
       (p/then #(def -r %)))
   (-> ((:readFile fs) (path/path-join base-dir ".git/HEAD"))
