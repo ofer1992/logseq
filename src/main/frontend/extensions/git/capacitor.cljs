@@ -10,9 +10,11 @@
             [goog.crypt.base64]
             [logseq.common.path :as path]
             [goog.crypt.base64 :as base64]
-            ["fs-extra" :as fs]))
+            ["fs-extra" :as fs]
+            [clojure.string :as string]))
 
 (def base-dir (config/get-repo-dir (state/get-current-repo)))
+
 (defn- create-stat [res]
   (let [new {:ino 1
              :uid 1
@@ -33,15 +35,21 @@
     e
     #_(throw e)))
 
-(defn base64-uint8 [data]
+(defn- base64->uint8 [data]
   ;; TODO might need to return an array buffer
   (let [data (.replace data #"[^A-Za-z0-9+/]" "")
         buffer (goog.crypt.base64.decodeStringToByteArray data)
         buffer (js/Uint8Array. buffer)]
     buffer))
 
+(defn- uint8->base64 [data]
+  (goog.crypt.base64.encodeByteArray  (js/Uint8Array. data)))
+
 (comment
-  (set! js/Test (base64-uint8 " 12")))
+  (set! js/Test (base64-uint8 " 12"))
+  (uint8->base64 [0 0 0])
+  (-> (:readFile fs) "file:/storage/emulated/0/Documents/logseq_dev/.git/HEAD" {:encoding "utf8"}
+      (p/then #(def -r %))))
 
 (def capacitor-fs
   (as-> {:mkdir (fn mkdir! [dir]
@@ -50,11 +58,10 @@
                            {:path dir})))
 
          :readdir (fn readdir [dir]                  ; recursive
-                    (log/info :readdir {:dir dir})
                     (p/let [result (.readdir Filesystem (clj->js {:path dir}))
                             result (js->clj result :keywordize-keys true)
                             files (map :name (:files result))]
-                      (js/console.log result)
+                      (log/info :readdir {:dir dir :files files})
                       files))
          :unlink identity #_(fn unlink! [this repo fpath _opts]
                               (p/let [repo-dir (config/get-local-dir repo)
@@ -73,23 +80,28 @@
          :readFile (fn read-file [path options]
          ;; todo stat check that it's a file
          ;; what to do when called from js
-                     #_(when (nil? path) (throw (js/Error. "path is required")))
                      (log/info :readFile {:path path :options options})
-                     (p/let [res (.readFile Filesystem (clj->js (merge {:path path} options)))
-                             data (.-data res)]
-                       (set! js/test data)
-                       (if (nil? (get options :encoding))
-                         (base64-uint8 data)
+                     (if (nil? path)
+                       (p/promise nil)
+                       (p/let [options (js->clj options :keywordize-keys true)
+                               res (.readFile Filesystem (clj->js (merge {:path path} options)))
+                               data (.-data res)
+                               data (if (nil? (get options :encoding)) (base64->uint8 data) data)]
+                         (log/info :readFile {:path path :options options :data data})
                          data)))
 
          :writeFile (fn write-file! [path content opts]
-                      (.writeFile Filesystem (clj->js {:path path :data content :encoding (get opts :encoding)})))
+                      (log/info :writeFile {:path path :content content :opts opts})
+                      (when-not (string/blank? path)
+                        (p/let [utf (:encoding (js->clj opts :keywordize-keys true))
+                                content (if (= utf "utf8") content (uint8->base64 content))]
+                          (.writeFile Filesystem (clj->js {:path path :data content :encoding (get opts :encoding)})))))
 
          :stat (fn stat [path & options]
                  (log/info :stat {:path path :options options})
                  (-> (p/let [res (.stat Filesystem (clj->js {:path path}))
-                             updated (create-stat (js->clj res :keywordize-keys true))]
-                       (log/info :stat {:path path :options options :res res})
+                             updated (clj->js (create-stat (js->clj res :keywordize-keys true)))]
+                       (log/info :stat {:path path :options options :res res :updated updated})
                        updated)
                      (p/catch #(fs-error % "ENOENT"))
                      #_(p/catch (fn [e] (let [e (fs-error e "ENOENT")] (set! js/test e) (throw e))))))
@@ -135,5 +147,14 @@
   (js/console.log -r)
   (set! js/test (clj->js -r))
   (goog.crypt.base64)
-  (goog.crypt.base64.decodeStringToByteArray "12"))
+  (goog.crypt.base64.decodeStringToByteArray "12")
+  (-> ((:readFile fs) "file:/storage/emulated/0/Documents/logseq_dev/.git/HEAD" {:encoding "utf8"})
+      (p/then #(def -r %)))
+  -r
+  (-> ((:readdir fs) "file:/storage/emulated/0/Documents/logseq_dev/journals")
+      (p/then #(def -r %)))
+  -r
+  (def tmppath  "file:/storage/emulated/0/Documents/logseq_dev/testing_yo.md")
+  (.writeFile Filesystem (clj->js {:path tmppath :data "hahaha" :encoding "utf8"}))
+  ((:writeFile fs) tmppath "hehehe" {:encoding "utf8"}))
 
