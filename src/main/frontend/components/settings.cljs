@@ -48,6 +48,17 @@
      (ui/toggle state on-toggle true)
      detail-text]]])
 
+(defn input-box
+    [label-for name state on-input & [detail-text]]
+    [:div.it.sm:grid.sm:grid-cols-3.sm:gap-4.sm:items-center
+     [:label.block.text-sm.font-medium.leading-5.opacity-70
+        {:for label-for}
+        name]
+     [:div.rounded-md.sm:max-w-tss.sm:col-span-2
+        [:div.rounded-md {:style {:display "flex" :gap "1rem" :align-items "center"}}
+         (ui/input state on-input true)
+         detail-text]]])
+
 (rum/defcs app-updater < rum/reactive
   [state version]
   (let [update-pending? (state/sub :electron/updater-pending?)
@@ -239,37 +250,38 @@
 
 (rum/defcs switch-git-auto-commit-row < rum/reactive
   [state t]
-  (let [enabled? (state/get-git-auto-commit-enabled?)]
-    [:div.it.sm:grid.sm:grid-cols-3.sm:gap-4.sm:items-center
-     [:label.block.text-sm.font-medium.leading-5.opacity-70
-      (t :settings-page/git-switcher-label)]
-     [:div
-      [:div.rounded-md.sm:max-w-xs
-       (ui/toggle
-         enabled?
-         (fn []
-           (state/set-state! [:electron/user-cfgs :git/disable-auto-commit?] enabled?)
-           (p/do!
-            (ipc/ipc :userAppCfgs :git/disable-auto-commit? enabled?)
-            (ipc/ipc :setGitAutoCommit)))
-         true)]]]))
+  (let [enabled? (false? (state/disable-auto-commit?))]
+    (toggle "preferred_autocommit"
+            [(t :settings-page/git-switcher-label)]
+            enabled?
+            config-handler/toggle-disable-auto-commit!)))
+
 
 (rum/defcs switch-git-commit-on-close-row < rum/reactive
   [state t]
-  (let [enabled? (state/get-git-commit-on-close-enabled?)]
-    [:div.it.sm:grid.sm:grid-cols-3.sm:gap-4.sm:items-center
-     [:label.block.text-sm.font-medium.leading-5.opacity-70
-      (t :settings-page/git-commit-on-close)]
-     [:div
-      [:div.rounded-md.sm:max-w-xs
-       (ui/toggle
-         enabled?
-         (fn []
-           (state/set-state! [:electron/user-cfgs :git/commit-on-close?] (not enabled?))
-           (ipc/ipc :userAppCfgs :git/commit-on-close? (not enabled?)))
-         true)]]]))
+  (let [enabled? (state/commit-on-close?)]
+    (toggle "preferred_commit_on_close"
+            [(t :settings-page/git-commit-on-close)]
+            enabled?
+            config-handler/toggle-commit-on-close!)))
 
 (rum/defcs git-auto-commit-seconds < rum/reactive
+  [state t]
+  (let [secs (or (state/auto-commit-seconds) 60)]
+    (input-box "git_auto_commit_seconds"
+               [(t :settings-page/git-commit-delay)]
+               secs
+               (fn [value]  (let [value (-> value
+                                            util/safe-parse-int)]
+                              (if (and (number? value)
+                                       (< 0 value (inc 86400)))
+                                (config-handler/set-auto-commit-seconds! value)
+                                (notification/show!
+                                     [:div "Invalid value! Must be a number between 1 and 86400"]
+                                     :warning true)
+                                ))))))
+
+#_(rum/defcs git-auto-commit-seconds < rum/reactive
   [state t]
   (let [secs (or (state/sub [:electron/user-cfgs :git/auto-commit-seconds]) 60)]
     [:div.it.sm:grid.sm:grid-cols-3.sm:gap-4.sm:items-center
@@ -293,6 +305,21 @@
                                  [:div "Invalid value! Must be a number between 1 and 86400"]
                                  :warning true)
                                 (gobj/set elem "value" secs)))))}]]]]))
+
+(rum/defcs git-personal-access-token < rum/reactive
+  [state t]
+  (let [pat (or (state/personal-access-token) "")]
+    (input-box "git_personal_access_token"
+               [(t :settings-page/git-personal-access-token)]
+               pat
+               (fn [value]   (config-handler/set-personal-access-token! value)
+                 #_(if (and value (not (clojure.string/blank? value))
+                                       )
+                                (config-handler/set-personal-access-token! value)
+                                (notification/show!
+                                     [:div "Invalid value! Must be a number between 1 and 86400"]
+                                     :warning true)
+                                )))))
 
 (rum/defc app-auto-update-row < rum/reactive [t]
   (let [enabled? (state/sub [:electron/user-cfgs :auto-update])
@@ -776,7 +803,8 @@
    [:br]
    (switch-git-auto-commit-row t)
    (switch-git-commit-on-close-row t)
-   (git-auto-commit-seconds t)])
+   (git-auto-commit-seconds t)
+   (git-personal-access-token t)])
 
 (rum/defc settings-advanced < rum/reactive
   [current-repo]
@@ -1163,8 +1191,9 @@
                [:editor "editor" (t :settings-page/tab-editor) (ui/icon "writing")]
                [:keymap "keymap" (t :settings-page/tab-keymap) (ui/icon "keyboard")]
 
-               (when (util/electron?)
-                 [:version-control "git" (t :settings-page/tab-version-control) (ui/icon "history")])
+              ;;  (when (util/electron?)
+                 [:version-control "git" (t :settings-page/tab-version-control) (ui/icon "history")]
+              ;;  )
 
                ;; (when (util/electron?)
                ;;   [:assets "assets" (t :settings-page/tab-assets) (ui/icon "box")])

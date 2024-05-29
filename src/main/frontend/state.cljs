@@ -1935,9 +1935,25 @@ Similar to re-frame subscriptions"
   []
   (false? (sub [:electron/user-cfgs :git/disable-auto-commit?])))
 
+(defn disable-auto-commit?
+  []
+  (:git/disable-auto-commit? (sub-config)))
+
 (defn get-git-commit-on-close-enabled?
   []
   (sub [:electron/user-cfgs :git/commit-on-close?]))
+
+(defn commit-on-close?
+  []
+  (:git/commit-on-close? (sub-config)))
+
+(defn auto-commit-seconds
+  []
+  (:git/auto-commit-seconds (sub-config)))
+
+(defn personal-access-token 
+  []
+  (:git/personal-access-token (sub-config)))
 
 (defn set-last-key-code!
   [key-code]

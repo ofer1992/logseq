@@ -301,6 +301,13 @@
  ;; Favorites to list on the left sidebar
  :favorites []
 
+ ;; Git configuration
+ ;; Example usage:
+;;  :git/disable-auto-commit? true ; Default value: false
+;;  :git/auto-commit-seconds 10 ; Default value: 60
+;;  :git/commit-on-close? false ; Default value: false
+;;  :git/personal-access-token "aksjndge" ; Default value: ""
+
  ;; Set flashcards interval.
  ;; Expected value:
  ;; - Float between 0 and 1

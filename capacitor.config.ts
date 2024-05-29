@@ -24,7 +24,10 @@ const config: CapacitorConfig = {
 
     Keyboard: {
       resize: 'none'
-    }
+    },
+    CapacitorHttp: {
+      enabled: true,
+    },
   },
   android: {
     appendUserAgent: `Logseq/${version} (Android)`
@@ -40,10 +43,10 @@ const config: CapacitorConfig = {
   }
 }
 
-if (process.env.LOGSEQ_APP_SERVER_URL) {
+if ("http://192.168.1.68:3001") {
   Object.assign(config, {
     server: {
-      url: process.env.LOGSEQ_APP_SERVER_URL,
+      url: "http://192.168.1.68:3001",
       cleartext: true
     }
   })

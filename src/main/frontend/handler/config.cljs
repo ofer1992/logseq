@@ -53,3 +53,17 @@
 (defn toggle-preferred-pasting-file! []
   (let [preferred-pasting-file? (state/preferred-pasting-file?)]
     (set-config! :editor/preferred-pasting-file? (not preferred-pasting-file?))))
+
+(defn toggle-disable-auto-commit! []
+  (let [disable-auto-commit (state/disable-auto-commit?)]
+    (set-config! :git/disable-auto-commit? (not disable-auto-commit))))
+
+(defn toggle-commit-on-close! []
+  (let [commit-on-close (state/commit-on-close?)]
+    (set-config! :git/commit-on-close? (not commit-on-close))))
+
+(defn set-auto-commit-seconds! [seconds]
+  (set-config! :git/auto-commit-seconds seconds))
+
+(defn set-personal-access-token! [pat]
+  (set-config! :git/personal-access-token pat))

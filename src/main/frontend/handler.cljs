@@ -5,6 +5,7 @@
             [clojure.string :as string]
             [electron.ipc :as ipc]
             [electron.listener :as el]
+            [frontend.extensions.git.core :as git]
             [frontend.components.block :as block]
             [frontend.components.editor :as editor]
             [frontend.components.page :as page]
@@ -243,7 +244,9 @@
    (when config/dev?
      (enable-datalog-console))
    (persist-var/load-vars)
-   (js/setTimeout instrument! (* 60 1000))))
+   (js/setTimeout instrument! (* 60 1000)))
+   (js/console.log "configuring auto commit!")
+   #_(git/configure-auto-commit!))
 
 (defn stop! []
   (prn "stop!"))

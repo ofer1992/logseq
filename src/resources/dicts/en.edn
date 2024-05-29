@@ -290,6 +290,7 @@
  :settings-page/git-commit-on-close "Git commit on window close"
  :settings-page/git-switcher-label "Enable Git auto commit"
  :settings-page/git-commit-delay "Git auto commit seconds"
+ :settings-page/git-personal-access-token "Git personal access token"
  :settings-page/edit-config-edn "Edit config.edn"
  :settings-page/edit-global-config-edn "Edit global config.edn"
  :settings-page/edit-custom-css "Edit custom.css"

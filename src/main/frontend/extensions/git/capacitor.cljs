@@ -1,6 +1,5 @@
 (ns frontend.extensions.git.capacitor
   (:require ["@capacitor/filesystem" :refer [Encoding Filesystem Directory]]
-            ["isomorphic-git" :as git] ;; TODO temp
             [frontend.config :as config]
             [frontend.state :as state]
             [promesa.core :as p]
@@ -112,7 +111,7 @@
                     (-> (p/let [result (.readdir Filesystem (clj->js {:path dir}))
                                 result (js->clj result :keywordize-keys true)
                                 files (clj->js (map :name (:files result)))]
-                          (log/info :readdir {:dir dir :files files})
+                          #_(log/info :readdir {:dir dir :files files})
                           files)
                         (p/catch (fn [error]
                                    (throw (fs-error error "ENOTDIR"))))
@@ -135,19 +134,19 @@
          :readFile (fn read-file [path options]
          ;; todo stat check that it's a file
          ;; what to do when called from js
-                     (log/info :readFile {:path path :options options})
+                     #_(log/info :readFile {:path path :options options})
                      (if (nil? path)
                        (p/promise nil)
                        (p/let [options (js->clj options :keywordize-keys true)
                                res (.readFile Filesystem (clj->js (merge {:path path} options)))
                                data (.-data res)
                                data (if (nil? (get options :encoding)) (base64->uint8 data) data)]
-                         (log/info :readFile {:path path :options options :data data})
+                         #_(log/info :readFile {:path path :options options :data data})
                          data)))
 
          :writeFile (fn write-file!
                       [path content opts]
-                       (log/info :writeFile {:path path :content content :opts opts})
+                       #_(log/info :writeFile {:path path :content content :opts opts})
                         (when-not (string/blank? path)
                           (p/let [opts (js->clj opts :keywordize-keys true)
                                   ;; check if content type is Uint8Array
@@ -157,10 +156,10 @@
                               (.writeFile Filesystem (clj->js {:path path :data content :encoding "utf8"}))))))
 
          :stat (fn stat [path & options]
-                 (log/info :stat {:path path :options options})
+                 #_(log/info :stat {:path path :options options})
                  (-> (p/let [res (.stat Filesystem (clj->js {:path path}))
                              updated (clj->js (create-stat (js->clj res :keywordize-keys true)))]
-                       (log/info :stat {:path path :options options :res res :updated updated})
+                       #_(log/info :stat {:path path :options options :res res :updated updated})
                        updated)
                      (p/catch #(throw ( fs-error % "ENOENT")))
                      #_(p/catch (fn [e] (let [e (fs-error e "ENOENT")] (set! js/test e) (throw e))))))
@@ -172,6 +171,8 @@
          :symlink identity} fs
     (assoc fs :lstat (:stat fs))))
 
+(defn get-fs []
+  capacitor-fs)
 ;; {:writeFile {:path 
 ;; "file:/storage/emulat … gseq_dev/.git/config"
 ;; file:/storage/emulated/0/Documents/logseq_dev/.git/config
@@ -209,8 +210,10 @@
         (p/catch #(js/console.error %))))
   (js->clj -r)
   (.mkdir Filesystem #js {:path "file:/storage/emulated/0/Documents/logseq_dev/.git/hooks"})
-  (-> (.readFile Filesystem (clj->js {:path (path/path-join base-dir "pages/contents.md") :encoding "utf8"}))
-      (p/then #(def -r %)))
+  (-> (.readFile Filesystem (clj->js {:path (path/path-join base-dir ".git/config") :encoding "utf8"}))
+      (p/then #(js/console.log (.-data %)))
+      #_(p/then #(def -r %)))
+
   (-> ((:readFile fs) (path/path-join base-dir ".git/HEAD"))
       (p/then #(def -r %))
       (p/then #(js/console.log %))

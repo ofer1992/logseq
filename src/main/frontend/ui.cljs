@@ -573,6 +573,14 @@
       {:class       (if on? (if small? "translate-x-4" "translate-x-5") "translate-x-0")
        :aria-hidden "true"}]]]))
 
+(defn input
+    ([value on-input] (input value on-input false))
+    ([value on-input small?]
+     [:input#home-default-page.form-input.transition.duration-150.ease-in-out
+        {:default-value value
+         :on-blur (fn [event] (on-input (.-value (.-target event))))
+         :class (str "is-small " (if small? "sm:max-w-xs" "max-w-lg rounded-md"))}]))
+
 (defn keyboard-shortcut-from-config [shortcut-name & {:keys [pick-first?]}]
   (let [built-in-binding (:binding (get shortcut-config/all-built-in-keyboard-shortcuts shortcut-name))
         custom-binding  (when (state/shortcuts) (get (state/shortcuts) shortcut-name))
